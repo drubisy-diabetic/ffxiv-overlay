@@ -21,7 +21,7 @@ A high-performance, lightweight combat overlay for FFXIV on Linux. This tool con
 To use this overlay on Linux, your game must be configured to send data to ACT.
 
 1.  **Dalamud:** The plugin framework for FFXIV (included with [XIVLauncher](https://xivlauncher.com)).
-2.  **IINACT (Dalamud Plugin):** * Install via the Dalamud plugin [installer](https://www.iinact.com) (`/xlplugins`).
+2.  **IINACT (Dalamud Plugin):** * [Install](https://www.iinact.com) via the Dalamud plugin installer (`/xlplugins`).
     * This plugin acts as the bridge that sends combat data to ACT without needing specialized network drivers.
 
 ---
