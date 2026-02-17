@@ -130,8 +130,8 @@ Version=1.0
 Name=FFXIV Overlay
 Comment=ACT Combat Metrics Overlay
 # Update these paths to your actual locations
-Exec=/home/youruser/act/dist/FFXIV_Overlay
-Icon=/home/youruser/act/app_icon.png
+Exec=/home/<youruser>/ffxiv-overlay/dist/FFXIV_Overlay
+Icon=/home/<youruser>/ffxiv-overlay/app_icon.png
 Terminal=false
 Categories=Game;Utility;
 Keywords=ffxiv;act;overlay;dps;
