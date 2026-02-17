@@ -43,9 +43,8 @@ Right-clicking anywhere on the overlay opens a context menu with essential tools
 
 ### 1. Download the Repository
 ```bash
-git clone [https://github.com/drubisy-diabetic/ffxiv-overlay.git](https://github.com/drubisy-diabetic/ffxiv-overlay.git)
-cd ffxiv-overlay
-
+git clone [https://github.com/drubisy-diabetic/ffxiv-overlay.git](https://github.com/drubisy-diabetic/ffxiv-overlay.git) && cd ffxiv-overlay
+```
 
 🚀 How to Run (Using the Executable)
 You do not need to install Python to run the pre-compiled binary located in the dist folder.
@@ -53,47 +52,56 @@ You do not need to install Python to run the pre-compiled binary located in the 
 CachyOS / Arch:
 
 # Install required system libraries
+```bash
 sudo pacman -S qt6-base
+```
 
 # Execute the binary
+```bash
 cd dist
 chmod +x FFXIV_Overlay
 ./FFXIV_Overlay
-
+```
 
 Ubuntu / Debian
 
 # Install required system libraries
+```bash
 sudo apt install libxcb-cursor0
+```
 
 # Execute the binary
+```bash
 cd dist
 chmod +x FFXIV_Overlay
 ./FFXIV_Overlay
-
-
+```
 
 🛠️ Development & Manual Installation
 If you wish to run the source code or modify the logic:
 
 # Create and activate virtual environment
+```bash
 python3 -m venv venv
 source venv/bin/activate
+```
 
 # Install requirements
+```bash
 pip install PyQt6 websockets
-
+```
 # Launch
+```bash
 python3 overlay.py
-
+```
 
 
 📦 How to Rebuild the Binary
 If you make changes to the Python script and want to update the executable:
-
+```bash
 pip install pyinstaller
 pyinstaller --noconsole --onefile --name "FFXIV_Overlay" overlay.py
-
+```
 
 
 
