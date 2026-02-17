@@ -61,7 +61,14 @@ class PlayerRow(QFrame):
         
         job_key = str(job).lower().strip().replace(" ", "_")
         color = JOB_COLORS.get(job_key, JOB_COLORS["default"])
+        
+        q_color = QColor(color)
 
+        # bar_alpha: The combat color (higher visibility)
+        # bg_alpha: The empty bar background (lower visibility)
+        bar_alpha = int(opacity * 255)
+        bg_alpha = int(opacity * 130) # Offset: BG is dimmer than the bar color
+        r, g, b = q_color.red(), q_color.green(), q_color.blue()
         # 3. Fill in logic
         try:
             fill = float(relative_fill)
@@ -72,13 +79,13 @@ class PlayerRow(QFrame):
 
         # 4. Styling
         is_me = (name.upper() == "YOU")
-        border_style = f"1px solid rgba(255, 215, 0, {alpha})" if is_me else "none"
+        border_style = f"1px solid rgba(255, 215, 0, {bar_alpha})" if is_me else "none"
 
         self.setStyleSheet(f"""
             #PlayerRow {{
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                            stop:{fill} {color}, 
-                            stop:{fill + 0.001} rgba(40, 40, 40, 180));
+                            stop:{fill} rgba({r}, {g}, {b}, {bar_alpha}), 
+                            stop:{fill + 0.001} rgba(40, 40, 40, {bg_alpha}));
                             border-radius: 3px;
                 border: {border_style};
             }}
@@ -130,3 +137,4 @@ class PlayerRow(QFrame):
         stats_label = QLabel(f"{dps} ({percentage_str})")
         stats_label.setStyleSheet(f"color: rgba(255, 255, 255, {opacity * 0.7});")
         layout.addWidget(stats_label)
+
