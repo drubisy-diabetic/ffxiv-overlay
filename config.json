@@ -1,0 +1,16 @@
+{
+    "toggles": {
+        "damage%": true,
+        "DirectHitPct": true,
+        "crithit%": true,
+        "deaths": true,
+        "enchps": false,
+        "maxhit": false,
+        "critdirecthit%": false
+    },
+    "general": {
+        "font_size": 11,
+        "row_height": 28,
+        "opacity": 0.9
+    }
+}
