@@ -43,7 +43,7 @@ Right-clicking anywhere on the overlay opens a context menu with essential tools
 
 ### 1. Download the Repository
 ```bash
-git clone [https://github.com/drubisy-diabetic/ffxiv-overlay.git](https://github.com/drubisy-diabetic/ffxiv-overlay.git) && cd ffxiv-overlay
+git clone https://github.com/drubisy-diabetic/ffxiv-overlay.git && cd ffxiv-overlay
 ```
 
 🚀 How to Run (Using the Executable)
@@ -103,6 +103,46 @@ pip install pyinstaller
 pyinstaller --noconsole --onefile --name "FFXIV_Overlay" overlay.py
 ```
 
+🐧 Linux Desktop Integration
+If you want the overlay to appear in your application launcher (like GNOME or KDE) with a proper icon and name, follow these steps:
 
+1. Build the Executable
+Ensure you have bundled your icons into the binary using PyInstaller:
+
+```bash
+pyinstaller --noconsole --onefile --add-data "icons:icons" --name "FFXIV_Overlay" overlay.py
+```
+
+2. Create a Desktop Entry
+Create a file named ffxiv-overlay.desktop in your local applications folder:
+
+```bash
+nano ~/.local/share/applications/ffxiv-overlay.desktop
+```
+
+3. Add the Configuration
+Paste the following content into the file. Note: Make sure to replace /path/to/your/... with the actual absolute paths on your system.
+
+```bash
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=FFXIV Overlay
+Comment=ACT Combat Metrics Overlay
+# Update these paths to your actual locations
+Exec=/home/youruser/act/dist/FFXIV_Overlay
+Icon=/home/youruser/act/app_icon.png
+Terminal=false
+Categories=Game;Utility;
+Keywords=ffxiv;act;overlay;dps;
+```bash
+
+4. Register the App
+Run these commands to make the file executable and refresh your application database:
+
+```bash
+chmod +x ~/.local/share/applications/ffxiv-overlay.desktop
+update-desktop-database ~/.local/share/applications/
+```
 
 Created by drubisy-diabetic
