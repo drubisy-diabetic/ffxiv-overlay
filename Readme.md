@@ -135,7 +135,7 @@ Icon=/home/youruser/act/app_icon.png
 Terminal=false
 Categories=Game;Utility;
 Keywords=ffxiv;act;overlay;dps;
-```bash
+```
 
 4. Register the App
 Run these commands to make the file executable and refresh your application database:
