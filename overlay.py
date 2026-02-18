@@ -1,6 +1,5 @@
 import sys, os, json, asyncio, threading
-from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, 
-                             QFrame, QSizeGrip, QLabel, QMenu,QSlider)
+from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal, QObject
 from PyQt6.QtGui import QAction
 import websockets
@@ -13,9 +12,6 @@ from player import PlayerRow
 # Force X11 for stability
 os.environ["QT_QPA_PLATFORM"] = "xcb"
 
-class Bridge(QObject):
-    data_received = pyqtSignal(dict)
-
 class Overlay(QWidget):
     def __init__(self):
         super().__init__()
@@ -27,7 +23,8 @@ class Overlay(QWidget):
         # 2. Window Setup
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | 
-            Qt.WindowType.WindowStaysOnTopHint
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
@@ -40,59 +37,65 @@ class Overlay(QWidget):
         # 5. WebSocket Bridge
         self.bridge = Bridge()
         self.bridge.data_received.connect(self.update_ui)
+        self.bridge.connection_status.connect(self.update_status_light)
         threading.Thread(target=self.start_ws_loop, daemon=True).start()
         
         self.show()
 
     def init_ui(self):
-        # 1. Setup the outer layout
+        # 1. Outer layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # 2. Setup the container and the internal rows_layout
+
+        # 2. Container
         self.container = QFrame()
+        self.container.setObjectName("MainContainer")
         self.container.setStyleSheet("background: rgba(20, 20, 20, 220); border: 1px solid #444; border-radius: 6px;")
-        
-        self.rows_layout = QVBoxLayout(self.container) # <-- NOW IT EXISTS
+
+        self.rows_layout = QVBoxLayout(self.container)
         self.rows_layout.setContentsMargins(4, 4, 4, 4)
         self.rows_layout.setSpacing(2)
         self.rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        
+
         self.main_layout.addWidget(self.container)
 
-        # 3. NOW add the header (Index 0)
-        self.header_label = QLabel("Waiting for Combat...")
-        self.header_label.setStyleSheet("color: #888; font-size: 10px; font-weight: bold; padding: 2px;")
-        self.rows_layout.addWidget(self.header_label)
+        # 3. Header Layout (Label + Status Dot)
+        header_container = QHBoxLayout()
         
-        # 4. Add the line (Index 1)
+        self.header_label = QLabel("Waiting for Combat...")
+        self.header_label.setStyleSheet("color: #888; font-size: 10px; font-weight: bold; background: transparent; border: none;")
+        
+        # --- THE STATUS DOT ---
+        self.status_dot = QLabel()
+        self.status_dot.setFixedSize(6, 6)
+        self.status_dot.setStyleSheet("background-color: #ff4444; border-radius: 3px; border: none;") # Start Red
+        self.status_dot.setToolTip("Searching for ACT...")
+
+        header_container.addWidget(self.header_label)
+        header_container.addStretch()
+        header_container.addWidget(self.status_dot)
+        self.rows_layout.addLayout(header_container)
+
+        # 4. Separator Line
         line = QFrame()
         line.setFixedHeight(1)
         line.setStyleSheet("background: rgba(255,255,255,20);")
         self.rows_layout.addWidget(line)
-        
-        #4.5 Transparency Slider
+
+        # 4.5 Transparency Slider
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(20, 255)  # Min 20 (faint), Max 255 (solid)
-        self.opacity_slider.setValue(220)      # Default starting value
+        self.opacity_slider.setRange(20, 255)
+        self.opacity_slider.setValue(220)
         self.opacity_slider.setFixedHeight(10)
         self.opacity_slider.setStyleSheet("""
-        QSlider::handle:horizontal {
-        background: #888;
-        width: 10px;
-        border-radius: 5px;
-        }
-        QSlider::groove:horizontal {
-        background: rgba(255, 255, 255, 20);
-        height: 4px;
-        }
+            QSlider::handle:horizontal { background: #888; width: 10px; border-radius: 5px; }
+            QSlider::groove:horizontal { background: rgba(255, 255, 255, 20); height: 4px; }
         """)
-        # Connect the slider to a function
         self.opacity_slider.valueChanged.connect(self.update_opacity)
         self.rows_layout.addWidget(self.opacity_slider)
 
-        # 5. Grip and Geometry
         self.grip = QSizeGrip(self)
+
         geom = self.settings.value("geometry")
         if geom: 
             self.restoreGeometry(geom)
@@ -207,13 +210,15 @@ class Overlay(QWidget):
     async def listen(self):
         uri = "ws://127.0.0.1:10501/MiniParse"
     
-        while True: # Outer loop: Reconnect if the connection drops
+        while True:  # Outer loop: Keeps trying to connect/reconnect
             try:
                 print(f"CONNECTING TO: {uri}")
                 async with websockets.connect(uri) as ws:
+                    self.bridge.connection_status.emit(True)
                     print("CONNECTED to ACT via MiniParse!")
-                
-                    while True: # Inner loop: Receive messages while connected
+                    # Optional: self.bridge.connection_status.emit(True)
+
+                    while True:  # Inner loop: Processes incoming messages
                         try:
                             msg = await ws.recv()
                             raw = json.loads(msg)
@@ -233,15 +238,14 @@ class Overlay(QWidget):
                                     print(f"Ignoring non-combat packet: {msg_type}")
                                 
                         except websockets.ConnectionClosed:
-                            print("Connection to ACT lost. Attempting to reconnect...")
-                            break # Break inner loop to trigger reconnect in outer loop
+                            self.bridge.connection_status.emit(False)
+                            print("Connection lost. Retrying in 5 seconds...")
+                            break  # Break inner loop to reconnect in outer loop
 
-            except (OSError, websockets.InvalidURI, websockets.InvalidHandshake):
-                # This catches cases where ACT isn't even open yet
-                print("ACT not found. Retrying in 5 seconds...")
-                await asyncio.sleep(5) 
             except Exception as e:
-                print(f"Unexpected error: {e}. Retrying in 5 seconds...")
+                # Catches "Connection Refused" if ACT isn't open
+                print(f"ACT not found or error: {e}. Retrying in 5 seconds...")
+                # Optional: self.bridge.connection_status.emit(False)
                 await asyncio.sleep(5)
 
     def mousePressEvent(self, event):
@@ -261,6 +265,30 @@ class Overlay(QWidget):
             border: 1px solid rgba(255, 255, 255, 30); 
             border-radius: 6px;
         """)
+
+    def update_status_light(self, connected):
+        """Updates the small dot color based on connection state"""
+        if connected:
+            self.status_dot.setStyleSheet("background-color: #44ff44; border-radius: 3px; border: none;")
+            self.status_dot.setToolTip("Connected to ACT")
+        else:
+            self.status_dot.setStyleSheet("background-color: #ff4444; border-radius: 3px; border: none;")
+            self.status_dot.setToolTip("Searching for ACT...")
+
+    def update_status_light(self, connected):
+        """Updates the small dot color based on connection state"""
+        if connected:
+            # IT IS ACTIVE: Change to Green
+            self.status_dot.setStyleSheet("background-color: #44ff44; border-radius: 3px; border: none;")
+            self.status_dot.setToolTip("Connected to ACT")
+        else:
+            # IT IS SEARCHING: Change to Red
+            self.status_dot.setStyleSheet("background-color: #ff4444; border-radius: 3px; border: none;")
+            self.status_dot.setToolTip("Searching for ACT...")
+
+class Bridge(QObject):
+    data_received = pyqtSignal(dict)
+    connection_status = pyqtSignal(bool) # Add this signal
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
