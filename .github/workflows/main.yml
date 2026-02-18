@@ -1,0 +1,23 @@
+name: Build Windows EXE
+on: [push]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install Dependencies
+        run: |
+          pip install PyQt6 websockets pyinstaller
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconsole --onefile --add-data "icons;icons" --name "FFXIV_Overlay" overlay.py
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFXIV_Overlay_Windows
+          path: dist/FFXIV_Overlay.exe
