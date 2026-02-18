@@ -7,22 +7,22 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install PyInstaller
-        run: pip install PyQt6 websockets pyinstaller
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 websockets pyinstaller
 
-      - name: Build EXE
-        shell: cmd
+      - name: Build with PyInstaller
+        # We use "cmd" style syntax for the semicolon but keep the file path clean
         run: pyinstaller --noconsole --onefile --add-data "icons;icons" --name "FFXIV_Overlay" overlay.py
 
-      - name: Upload
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: FFXIV_Overlay_Windows
