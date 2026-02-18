@@ -13,6 +13,8 @@ A high-performance, lightweight combat overlay for FFXIV on Linux. This tool con
 * **Job Awareness:** Automatic coloring based on FFXIV job roles (including Viper/Picto).
 * **Death Tracker:** Visual skull icons `💀` appear for players who have died.
 * **UI Controls:** Integrated transparency slider and window resizing grip.
+* **Auto-Reconnection**: The overlay uses a [Non-Blocking Async Loop](https://docs.python.org/3/library/asyncio.html) to keep the window open even if ACT is closed.
+* **Smart UI**: If the websocket drops, the overlay stays active and silently searches for a new connection every 5 seconds.
 
 ---
 
