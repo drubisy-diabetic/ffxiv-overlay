@@ -4,6 +4,8 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal, QObject
 from PyQt6.QtGui import QAction
 import websockets
+import json
+import asyncio
 
 # Import your player row class
 from player import PlayerRow
@@ -204,42 +206,43 @@ class Overlay(QWidget):
 
     async def listen(self):
         uri = "ws://127.0.0.1:10501/MiniParse"
-        print(f"CONNECTING TO: {uri}")
-        
-        while True:
+    
+        while True: # Outer loop: Reconnect if the connection drops
             try:
+                print(f"CONNECTING TO: {uri}")
                 async with websockets.connect(uri) as ws:
                     print("CONNECTED to ACT via MiniParse!")
-                    
-                    while True:
-                        msg = await ws.recv()
-                        raw = json.loads(msg)
-                        
-                        # FIX: Ensure 'raw' is a dictionary before calling .get()
-                        if not isinstance(raw, dict):
-                            # If it's just a string like "connected", skip it
-                            continue
+                
+                    while True: # Inner loop: Receive messages while connected
+                        try:
+                            msg = await ws.recv()
+                            raw = json.loads(msg)
 
-                        # Drill down into the 'msg' wrapper if it exists
-                        data = raw.get('msg', raw)
-                        
-                        # Re-check if the inner data is also a dictionary
-                        if not isinstance(data, dict):
-                            continue
+                            if not isinstance(raw, dict):
+                                continue
 
-                        # Check for the actual combat data
-                        if 'Combatant' in data or 'combatant' in data:
-                            self.bridge.data_received.emit(data)
-                        else:
-                            # Log non-combat packets for debugging
-                            msg_type = data.get('type', 'unknown')
-                            if msg_type != 'unknown':
-                                print(f"Ignoring non-combat packet: {msg_type}")
+                            data = raw.get('msg', raw)
+                            if not isinstance(data, dict):
+                                continue
 
+                            if 'Combatant' in data or 'combatant' in data:
+                                self.bridge.data_received.emit(data)
+                            else:
+                                msg_type = data.get('type', 'unknown')
+                                if msg_type != 'unknown':
+                                    print(f"Ignoring non-combat packet: {msg_type}")
+                                
+                        except websockets.ConnectionClosed:
+                            print("Connection to ACT lost. Attempting to reconnect...")
+                            break # Break inner loop to trigger reconnect in outer loop
+
+            except (OSError, websockets.InvalidURI, websockets.InvalidHandshake):
+                # This catches cases where ACT isn't even open yet
+                print("ACT not found. Retrying in 5 seconds...")
+                await asyncio.sleep(5) 
             except Exception as e:
-                # This will now only catch REAL errors, not the string/dict mismatch
-                print(f"CONNECTION ERROR: {e}. Retrying...")
-                await asyncio.sleep(2)
+                print(f"Unexpected error: {e}. Retrying in 5 seconds...")
+                await asyncio.sleep(5)
 
     def mousePressEvent(self, event):
         if not self.locked and event.button() == Qt.MouseButton.LeftButton:
