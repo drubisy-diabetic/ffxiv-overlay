@@ -1,4 +1,4 @@
-import os
+import os, sys
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QColor
@@ -39,6 +39,17 @@ JOB_COLORS = {
     "pct": "#f19ed1", "default": "#555555"
 }
 
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 class PlayerRow(QFrame):
     def __init__(self, name, dps, percentage_str, job, relative_fill, deaths, opacity=1.0):
         super().__init__()
@@ -46,35 +57,24 @@ class PlayerRow(QFrame):
         self.setFixedHeight(26)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
-        # 1. Normalize Job and Map to Filename
+        # 1. Normalize Job
         raw_job = str(job).lower().strip()
         job_filename = JOB_NAME_MAP.get(raw_job, raw_job).replace(" ", "_")
         
         # 2. Transparency & Color Logic
-        color_hex = JOB_COLORS.get(job_filename, JOB_COLORS["default"])
+        job_key = str(job).lower().strip().replace(" ", "_")
+        color_hex = JOB_COLORS.get(job_key, JOB_COLORS["default"])
         q_color = QColor(color_hex)
         r, g, b = q_color.red(), q_color.green(), q_color.blue()
         
-        # Convert 0.0-1.0 opacity to 0-255 alpha
-        alpha = int(opacity * 255)
-        bg_alpha = int(opacity * 150) # Slightly more transparent background
-        
-        job_key = str(job).lower().strip().replace(" ", "_")
-        color = JOB_COLORS.get(job_key, JOB_COLORS["default"])
-        
-        q_color = QColor(color)
-
-        # bar_alpha: The combat color (higher visibility)
-        # bg_alpha: The empty bar background (lower visibility)
         bar_alpha = int(opacity * 255)
-        bg_alpha = int(opacity * 130) # Offset: BG is dimmer than the bar color
-        r, g, b = q_color.red(), q_color.green(), q_color.blue()
-        # 3. Fill in logic
+        bg_alpha = int(opacity * 130)
+        
+        # 3. Fill logic
         try:
             fill = float(relative_fill)
         except:
             fill = 0.0
-
         fill = max(0.0, min(0.99, fill))
 
         # 4. Styling
@@ -86,7 +86,7 @@ class PlayerRow(QFrame):
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
                             stop:{fill} rgba({r}, {g}, {b}, {bar_alpha}), 
                             stop:{fill + 0.001} rgba(40, 40, 40, {bg_alpha}));
-                            border-radius: 3px;
+                border-radius: 3px;
                 border: {border_style};
             }}
             QLabel {{
@@ -98,25 +98,33 @@ class PlayerRow(QFrame):
             }}
         """)
 
-        # 5. Layout
+        # 5. Layout & Icon Loading
         layout = QHBoxLayout(self)
         layout.setContentsMargins(6, 0, 6, 0)
         layout.setSpacing(6)
 
-        # --- Icon Loading ---
         self.icon_label = QLabel()
         self.icon_label.setFixedSize(18, 18)
         self.icon_label.setScaledContents(True)
+
+        # --- UPDATED PATH LOGIC ---
+        # We look for 'icons/warrior.png' inside the resource-aware path
+        relative_icon_path = os.path.join("icons", f"{job_filename}.png")
+        full_icon_path = resource_path(relative_icon_path)
         
-        # Use absolute path to icons folder
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icons", f"{job_filename}.png")
-        pixmap = QPixmap(icon_path)
-        
+        pixmap = QPixmap(full_icon_path)
+
         if not pixmap.isNull():
             self.icon_label.setPixmap(pixmap)
             layout.addWidget(self.icon_label)
         else:
-            self.icon_label.hide()
+            # Try a fallback "unknown" icon if the job icon fails
+            error_pixmap = QPixmap(resource_path("icons/error.png"))
+            if not error_pixmap.isNull():
+                self.icon_label.setPixmap(error_pixmap)
+                layout.addWidget(self.icon_label)
+            else:
+                self.icon_label.hide()
 
         # --- Death / Name / Stats ---
         try:
@@ -137,4 +145,3 @@ class PlayerRow(QFrame):
         stats_label = QLabel(f"{dps} ({percentage_str})")
         stats_label.setStyleSheet(f"color: rgba(255, 255, 255, {opacity * 0.7});")
         layout.addWidget(stats_label)
-
