@@ -146,5 +146,17 @@ Run these commands to make the file executable and refresh your application data
 chmod +x ~/.local/share/applications/ffxiv-overlay.desktop
 update-desktop-database ~/.local/share/applications/
 ```
+## 🪟 Windows Setup
+
+1. **Enable WebSocket in ACT**:
+   - Go to `Plugins` > `OverlayPlugin.dll` > [WSServer](https://github.com/ngld/OverlayPlugin/wiki/WSServer-integration).
+   - Set Port to `10501` and click **Start**.
+2. **Run the App**:
+   - Download the `FFXIV_Overlay.exe` from the [Releases](#) section.
+   - Run it while FFXIV and ACT are open.
+3. **Troubleshooting**:
+   - If the status dot is **Red**, ensure your Firewall is not blocking port `10501`.
+
+
 
 Created by drubisy-diabetic
