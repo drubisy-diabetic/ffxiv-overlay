@@ -1,0 +1,29 @@
+name: Build Windows EXE
+on: [push]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6 websockets pyinstaller
+
+      - name: Build with PyInstaller
+        # We use "cmd" style syntax for the semicolon but keep the file path clean
+        run: pyinstaller --noconsole --onefile --add-data "icons;icons" --name "FFXIV_Overlay" overlay.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FFXIV_Overlay_Windows
+          path: dist/FFXIV_Overlay.exe
