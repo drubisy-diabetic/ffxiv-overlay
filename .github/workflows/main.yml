@@ -7,8 +7,6 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -21,9 +19,9 @@ jobs:
           pip install PyQt6 websockets pyinstaller
 
       - name: Build with PyInstaller
-        # Using shell: cmd ensures the semicolon in --add-data is handled correctly
         shell: cmd
-        run: pyinstaller --noconsole --onefile --add-data "icons;icons" --name "FFXIV_Overlay" overlay.py
+        # Added --collect-all PyQt6 to ensure the 'windows' platform plugin is included
+        run: pyinstaller --noconsole --onefile --collect-all PyQt6 --add-data "icons;icons" --name "FFXIV_Overlay" overlay.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
