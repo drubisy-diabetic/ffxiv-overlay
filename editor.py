@@ -72,3 +72,6 @@ class ColorEditor(QWidget):
             self.hide() 
         except Exception as e:
             print(f"Error saving: {e}")
+
+
+
