@@ -16,8 +16,12 @@ def resource_path(relative_path):
     except Exception:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
-# Force X11 for stability
-os.environ["QT_QPA_PLATFORM"] = "xcb"
+# Force X11 for stability. This only makes sense on Linux/X11 systems; on
+# Windows (and other platforms) forcing the "xcb" platform plugin crashes
+# Qt because that plugin is not available there. Let Qt fall back to its
+# native platform on non-Windows-incompatible hosts instead.
+if sys.platform != "win32":
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 class Overlay(QWidget):
     def __init__(self):
