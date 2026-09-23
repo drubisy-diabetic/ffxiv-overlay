@@ -37,7 +37,28 @@ Right-clicking anywhere on the overlay opens a context menu with essential tools
 | **Lock Position** | Disables moving and resizing. Prevents accidental clicks during combat. |
 | **Enable Click-Through** | The overlay ignores mouse clicks, letting you interact with the game behind it. |
 | **Disable Click-Through** | Allows you to interact with the transparency slider and window grip. |
+| **Hide / Show Pre-pull Board** | Toggles the pre-pull leaderboard docked under the parser (the `×` on the board hides it too). |
+| **Test Pre-pull Popup** | Shows a sample popup (not counted) so you can check where it appears. |
+| **Reset Pre-pull Board** | Clears all pre-pull counts. |
 | **Quit** | Gracefully closes the overlay and saves your window position/size. |
+
+---
+
+## 🚨 Pre-pull Detection
+
+When someone engages the boss before a `/countdown` reaches zero, a **PRE-PULL!** banner shows their name, job and how early they were for 3 seconds, and they go up one on the **pre-pull leaderboard** docked under the parser.
+
+* **The countdown opens the window, and enmity decides who pulled.** The overlay opens a second connection to OverlayPlugin's `/ws` endpoint and subscribes to `EnmityTargetData` and `EnmityAggroList`. The first new enemy to get an enmity table during the countdown is the pull. The player with the top enmity on it is the puller, and a pet's enmity counts for its owner.
+* **Combat log lines back it up.** The first action from a player onto an enemy, or the first enemy hit on a player (a body pull), gives the exact time and the ability name. It is also the fallback when enmity isn't available, for example when nobody targeted the boss or `/ws` can't be reached.
+* A pull more than 1 s before zero counts as a pre-pull, which gives casters' pre-casts some margin.
+* **What doesn't count:** buffs, potions, heals, cancelled countdowns, pulls without a countdown, and enemies that were already in combat when the countdown started (for example a dummy you're still hitting).
+* **Status dot on the board:** green means enmity data is connected, grey means detection falls back to log lines only.
+* Counts are saved in `prepull_stats.json` next to the app.
+* Optional tuning in `config.json`:
+  ```json
+  "prepull": { "tolerance_s": 1.0, "popup_s": 3.0, "enmity": true,
+               "enmity_ws": "ws://127.0.0.1:10501/ws" }
+  ```
 
 ---
 
