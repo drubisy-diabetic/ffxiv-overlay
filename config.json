@@ -12,5 +12,8 @@
         "font_size": 11,
         "row_height": 28,
         "opacity": 0.9
+    },
+    "logging": {
+        "websocket": true
     }
 }
