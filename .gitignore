@@ -2,5 +2,7 @@ build/
 *.spec
 
 tests/*
+!tests/.gitkeep
 
 dist/*
+!dist/.gitkeep
