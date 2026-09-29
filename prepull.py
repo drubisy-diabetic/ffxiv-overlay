@@ -26,14 +26,23 @@ A pre-pull is "someone engaged the enemy before the countdown reached zero".
    isn't available (you weren't targeting the boss, or /ws isn't reachable).
    Self-buffs, heals, potions and untargeted AoEs never count.
 
-4. Whichever evidence arrives first starts a short confirmation window
-   (``confirm_window`` s) so the other can arrive too - the two come over
-   different sockets. Engagement time = the earliest evidence; puller = the
-   enmity table's top entry when present, else the action's actor.
+4. NOTHING IS DECIDED UNTIL THE COUNTDOWN REACHES ZERO (+ ``settle`` s for
+   late packets). Until then every engagement is only collected.
 
-5. Pre-pull if engagement time < countdown_end - ``tolerance`` (covers a
-   caster's pre-cast landing on "0"). Unused windows expire ``grace`` s
-   after zero.
+5. At that point, early engagements (more than ``tolerance`` s before zero)
+   are ORDERED BY THE SERVER'S ACTION SEQUENCE NUMBER (field 44 of every
+   21/22 line: one counter per instance shared by every player, enemy and
+   pet, assigned by the server) instead of by arrival time -- arrival order
+   differs between clients (ping), the sequence doesn't. The lowest sequence
+   is the first puller. Everyone else whose first early engagement is within
+   ``tie_window`` s of the first puller's also counts ("jumped together");
+   people reacting to a pre-pull (tank grabbing the boss) come later and
+   don't. Enmity-only evidence has no sequence number: it can add or time a
+   player but never outranks a sequenced action.
+
+6. A countdown cancelled AFTER someone already engaged is still judged at
+   the original zero (cancelling doesn't erase a pre-pull). Every decision --
+   clean pulls too -- is returned as a "pull" record for prepull_history.jsonl.
 """
 
 import json
@@ -133,10 +142,10 @@ class PrePullDetector:
 
     ENMITY_LIVE_SECONDS = 5.0   # enmity counts as "live" if a message arrived this recently
 
-    def __init__(self, tolerance=1.0, grace=30.0, confirm_window=0.75):
+    def __init__(self, tolerance=1.0, tie_window=0.5, settle=1.0):
         self.tolerance = float(tolerance)
-        self.grace = float(grace)
-        self.confirm_window = float(confirm_window)
+        self.tie_window = float(tie_window)
+        self.settle = float(settle)
         self.jobs = {}          # actor id (hex) -> job abbreviation
         self.names = {}         # actor id (hex) -> name
         self.owners = {}        # pet id (hex) -> owner id (hex)
@@ -144,12 +153,13 @@ class PrePullDetector:
         self.last_enmity_at = None
         self.engaged_target = {}   # enemy id -> True/False, from EnmityTargetData
         self.aggro_ids = set()     # enemy ids currently in EnmityAggroList
-        self.last_pull = None      # (name, timestamp, seconds_early, evidence) for debugging
+        self.last_pull = None      # last decision record, for debugging
         self._clear_countdown()
 
     # ----- state helpers -------------------------------------------------
     def _clear_countdown(self):
         self.countdown_end = None
+        self.countdown_start = None
         self.countdown_by = None
         self.baseline = set()
         self.pending = None
@@ -164,12 +174,8 @@ class PrePullDetector:
         return {i for i, engaged in self.engaged_target.items() if engaged} | self.aggro_ids
 
     def _window_open(self, now):
-        if self.countdown_end is None:
-            return False
-        if now > self.countdown_end + timedelta(seconds=self.grace):
-            self._clear_countdown()  # stale countdown, nobody pulled
-            return False
-        return True
+        """Evidence is collected from the countdown start until zero + settle."""
+        return self.countdown_end is not None and now <= self.countdown_end + timedelta(seconds=self.settle)
 
     def _owner_of(self, actor_id, name):
         owner = self.owners.get(actor_id)
@@ -178,61 +184,86 @@ class PrePullDetector:
         return actor_id, name
 
     # ----- evidence --------------------------------------------------------
-    def _add_evidence(self, when, kind, actor_id=None, name=None, job=None, ability=None, now=None):
-        """Record engagement evidence; returns an event if it can be decided now."""
+    def _add_evidence(self, when, kind, actor_id, name=None, job=None, ability=None, seq=None):
+        """Record that actor_id engaged at `when` (seen via `kind`)."""
         p = self.pending
         if p is None:
-            p = self.pending = {"time": when, "kinds": set(), "enmity": None, "action": None}
-        p["time"] = min(p["time"], when)
-        p["kinds"].add(kind)
-        info = {"id": actor_id, "name": name, "job": job, "ability": ability}
-        if kind == "enmity" and p["enmity"] is None:
-            p["enmity"] = info
-        elif kind == "action" and p["action"] is None:
-            p["action"] = info
-        # Decide immediately when both kinds are in, or when enmity isn't
-        # available at all (nothing to wait for).
-        if {"enmity", "action"} <= p["kinds"] or (kind == "action" and not self.enmity_live(now or when)):
-            return self._finalize()
-        return None
+            p = self.pending = {"first": when, "engagements": {}}
+        p["first"] = min(p["first"], when)
+        rec = p["engagements"].get(actor_id)
+        if rec is None:
+            rec = p["engagements"][actor_id] = {
+                "id": actor_id, "name": name, "job": job, "time": when,
+                "ability": ability, "kinds": set(), "seq": seq}
+        if when < rec["time"]:
+            rec["time"] = when
+            if ability:
+                rec["ability"] = ability
+        if seq is not None and (rec["seq"] is None or seq < rec["seq"]):
+            rec["seq"] = seq
+            rec["ability"] = ability or rec["ability"]
+        rec["kinds"].add(kind)
+        rec["name"] = rec["name"] or name
+        rec["job"] = rec["job"] or job
+        rec["ability"] = rec["ability"] or ability
+
+    def _maybe_finalize(self, now):
+        """Decide once the countdown has reached zero (+ settle)."""
+        if self.countdown_end is None or now < self.countdown_end + timedelta(seconds=self.settle):
+            return None
+        if self.pending is None:
+            self._clear_countdown()  # nobody engaged by zero: nothing to judge
+            return None
+        return self._finalize()
 
     def _finalize(self):
         p = self.pending
-        if p is None or self.countdown_end is None:
-            self.pending = None
-            return None
-        who = p["enmity"] or p["action"]
-        action = p["action"] or {}
-        # Ability name only if the action came from the same person enmity blames.
-        ability = action.get("ability") if (not p["enmity"] or action.get("id") == who["id"]) else None
-        early_by = (self.countdown_end - p["time"]).total_seconds()
-        countdown_by = self.countdown_by
-        evidence = "+".join(sorted(p["kinds"]))
-        self._clear_countdown()
-        self.last_pull = (who["name"], p["time"], early_by, evidence)
-        if early_by <= self.tolerance:
-            return None  # clean pull
-        return {
-            "type": "prepull",
-            "id": who["id"],
-            "name": who["name"] or "Unknown",
-            "job": who.get("job") or self.jobs.get(who["id"], "default"),
-            "early_by": round(early_by, 1),
-            "ability": ability,
-            "evidence": evidence,
-            "countdown_by": countdown_by,
-            "timestamp": p["time"].isoformat(),
+        end = self.countdown_end
+        cutoff = end - timedelta(seconds=self.tolerance)
+        recs = list(p["engagements"].values())
+        early = [r for r in recs if r["time"] < cutoff]
+
+        offenders = []
+        if early:
+            sequenced = [r for r in early if r["seq"] is not None]
+            # First puller: lowest server sequence (identical on every client);
+            # only when no early action was seen at all, earliest arrival time.
+            first = min(sequenced, key=lambda r: r["seq"]) if sequenced else min(early, key=lambda r: r["time"])
+            tie_limit = first["time"] + timedelta(seconds=self.tie_window)
+            offenders = [r for r in early if r is first or r["time"] <= tie_limit]
+            offenders.sort(key=lambda r: (r["seq"] is None, r["seq"] or 0, r["time"]))
+
+        def public(r):
+            return {
+                "id": r["id"],
+                "name": r["name"] or self.names.get(r["id"]) or "Unknown",
+                "job": r["job"] or self.jobs.get(r["id"], "default"),
+                "early_by": round((end - r["time"]).total_seconds(), 2),
+                "ability": r["ability"],
+                "seq": f"{r['seq']:X}" if r["seq"] is not None else None,
+                "evidence": "+".join(sorted(r["kinds"])),
+            }
+
+        ordered = sorted(recs, key=lambda r: (r["time"], r["seq"] or 0))
+        record = {
+            "type": "pull",
+            "timestamp": min(r["time"] for r in recs).isoformat(),
+            "countdown_by": self.countdown_by,
+            "countdown_start": self.countdown_start.isoformat() if self.countdown_start else None,
+            "countdown_end": end.isoformat(),
+            "cancelled": p.get("cancelled", False),
+            "enmity_live": self.enmity_live(end),
+            "offenders": [public(r) for r in offenders],
+            "engagements": [public(r) for r in ordered],
         }
+        self._clear_countdown()
+        self.last_pull = record
+        return record
 
     def tick(self, now=None):
-        """Call periodically: decides a pending engagement once its
-        confirmation window has passed, and expires stale countdowns."""
-        now = now or _utcnow()
-        if self.pending and (now - self.pending["time"]).total_seconds() >= self.confirm_window:
-            return self._finalize()
-        if self.pending is None:
-            self._window_open(now)
-        return None
+        """Call a few times a second: makes the decision once the countdown
+        has reached zero (+ settle)."""
+        return self._maybe_finalize(now or _utcnow())
 
     # ----- log lines -------------------------------------------------------
     def feed_line(self, line):
@@ -263,10 +294,13 @@ class PrePullDetector:
         elif code == "268":                   # Countdown
             self._on_countdown(parts, ts)
         elif code == "269":                   # CountdownCancel
-            self._clear_countdown()
+            if self.pending is None:
+                self._clear_countdown()
+            else:
+                self.pending["cancelled"] = True  # someone already engaged: still judge it at zero
         else:                                 # 21 / 22 abilities
-            return self._on_ability(parts, ts)
-        return None
+            self._on_ability(parts, ts)
+        return self._maybe_finalize(ts)
 
     def _on_add_combatant(self, parts):
         if len(parts) < 7:
@@ -294,6 +328,7 @@ class PrePullDetector:
         except ValueError:
             return
         self._clear_countdown()
+        self.countdown_start = ts
         self.countdown_end = ts + timedelta(seconds=seconds)
         self.countdown_by = parts[6] or None
         self.baseline = self._engaged_enemies()
@@ -314,8 +349,14 @@ class PrePullDetector:
             culprit = (tgt, tgt_name)
         if culprit is None:
             return None
-        return self._add_evidence(ts, "action", culprit[0], culprit[1],
-                                  self.jobs.get(culprit[0]), parts[5], now=ts)
+        seq = None
+        if len(parts) > 44:
+            try:
+                seq = int(parts[44], 16)  # server-assigned global action sequence
+            except ValueError:
+                seq = None
+        self._add_evidence(ts, "action", culprit[0], culprit[1], self.jobs.get(culprit[0]), parts[5], seq=seq)
+        return None
 
     # ----- enmity ------------------------------------------------------------
     def feed_enmity(self, message, now=None):
@@ -326,11 +367,13 @@ class PrePullDetector:
         kind = message.get("type")
         if kind == "EnmityTargetData":
             self.last_enmity_at = now
-            return self._on_target_data(message, now)
-        if kind == "EnmityAggroList":
+            self._on_target_data(message, now)
+        elif kind == "EnmityAggroList":
             self.last_enmity_at = now
-            return self._on_aggro_list(message, now)
-        return None
+            self._on_aggro_list(message, now)
+        else:
+            return None
+        return self._maybe_finalize(now)
 
     def _on_target_data(self, message, now):
         target = message.get("Target") or {}
@@ -339,25 +382,25 @@ class PrePullDetector:
             return None
         entries = [e for e in (message.get("Entries") or [])
                    if isinstance(e, dict) and (e.get("Enmity") or 0) > 0]
-        was_engaged = self.engaged_target.get(enemy, False)
         self.engaged_target[enemy] = bool(entries)
-        if not entries or was_engaged or not self._window_open(now) or enemy in self.baseline:
+        if not entries or enemy in self.baseline or not self._window_open(now):
             return None
-
-        # Top enmity = the puller (HateRate 100). Pets credited to the owner.
-        top = max(entries, key=lambda e: e.get("Enmity") or 0)
-        top_id = _hex_id(top.get("ID"))
-        name = top.get("Name")
-        owner_id = _hex_id(top.get("OwnerID"))
-        job = JOB_ID_TO_ABBR.get(top.get("Job") or 0)
-        if owner_id and owner_id != "00000000":
-            owner = next((e for e in entries if _hex_id(e.get("ID")) == owner_id), None)
-            top_id = owner_id
-            name = (owner or {}).get("Name") or self.names.get(owner_id, name)
-            job = JOB_ID_TO_ABBR.get((owner or {}).get("Job") or 0) or self.jobs.get(owner_id)
-        if not _is_player(top_id or ""):
-            return None
-        return self._add_evidence(now, "enmity", top_id, name, job, now=now)
+        # Everyone with enmity on this (new) enemy engaged by now; pets are
+        # credited to their owner. Times are "first seen", so a player who
+        # was already recorded keeps their earlier time.
+        for entry in entries:
+            actor = _hex_id(entry.get("ID"))
+            name = entry.get("Name")
+            job = JOB_ID_TO_ABBR.get(entry.get("Job") or 0)
+            owner_id = _hex_id(entry.get("OwnerID"))
+            if owner_id and owner_id != "00000000":
+                owner = next((e for e in entries if _hex_id(e.get("ID")) == owner_id), None)
+                actor = owner_id
+                name = (owner or {}).get("Name") or self.names.get(owner_id)
+                job = JOB_ID_TO_ABBR.get((owner or {}).get("Job") or 0) or self.jobs.get(owner_id)
+            if actor and _is_player(actor):
+                self._add_evidence(now, "enmity", actor, name, job or self.jobs.get(actor))
+        return None
 
     def _on_aggro_list(self, message, now):
         new_ids, first_new = set(), None
@@ -381,7 +424,8 @@ class PrePullDetector:
         if not _is_player(who_id):
             return None
         job = JOB_ID_TO_ABBR.get(target.get("Job") or 0) or self.jobs.get(who_id)
-        return self._add_evidence(now, "enmity", who_id, name, job, now=now)
+        self._add_evidence(now, "enmity", who_id, name, job)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +476,17 @@ class PrePullStore:
     def reset(self):
         self.players = {}
         self.save()
+
+    def append_history(self, record):
+        """One JSON line per pull decision (clean pulls too) in
+        prepull_history.jsonl next to the stats -- ~1 KB per pull, meant for
+        comparing what different players' overlays saw for the same pull."""
+        path = os.path.join(os.path.dirname(self.path), "prepull_history.jsonl")
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError as e:
+            print(f"Could not write pre-pull history: {e}")
 
     def ranking(self):
         return sorted(self.players.items(),
@@ -529,8 +584,25 @@ class PrePullPopup(QWidget):
         self.timer.setSingleShot(True)
         self.timer.timeout.connect(self.hide)
 
+    def show_pull(self, offenders, counts=None, colors=None, anchor=None):
+        """Show one or more pre-pullers from the same pull."""
+        if len(offenders) == 1:
+            return self.show_event(offenders[0], count=(counts or [None])[0], colors=colors, anchor=anchor)
+        colors = colors or {}
+        default = colors.get("default", "#ffffff")
+        self.icon.hide()
+        self.name.setTextFormat(Qt.TextFormat.RichText)
+        self.name.setText("  +  ".join(
+            f'<span style="color:{colors.get(o.get("job", "default"), default)}">{o["name"]}</span>'
+            for o in offenders))
+        self.name.setStyleSheet("font-size: 18px; font-weight: bold; color: #dddddd;")
+        self.detail.setText("  ·  ".join(f"{o['name'].split()[0]} {o['early_by']:.1f}s early" for o in offenders)
+                            + "  ·  jumped together")
+        self._place_and_show(anchor)
+
     def show_event(self, event, count=None, colors=None, anchor=None):
         colors = colors or {}
+        self.name.setTextFormat(Qt.TextFormat.PlainText)
         job = event.get("job", "default")
         self.name.setText(event["name"])
         self.name.setStyleSheet(
@@ -550,6 +622,9 @@ class PrePullPopup(QWidget):
             detail += f"  ·  #{count}"
         self.detail.setText(detail)
 
+        self._place_and_show(anchor)
+
+    def _place_and_show(self, anchor):
         self.adjustSize()
         screen = (anchor.screen() if anchor is not None else None) \
             or QGuiApplication.primaryScreen()
