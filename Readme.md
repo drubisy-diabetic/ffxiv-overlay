@@ -127,7 +127,7 @@ python3 overlay.py
 If you make changes to the Python script and want to update the executable:
 ```bash
 pip install pyinstaller
-pyinstaller --noconsole --onefile --name "FFXIV_Overlay" overlay.py
+pyinstaller FFXIV_Overlay.spec
 ```
 
 🐧 Linux Desktop Integration

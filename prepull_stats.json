@@ -1,34 +1,46 @@
 {
   "players": {
     "Bolas Von": {
-      "count": 3,
+      "count": 6,
       "job": "war",
-      "worst": 2.0,
-      "last": "2026-09-23T21:27:39.956774+00:00"
+      "worst": 9.09,
+      "last": "2026-10-07T20:11:51.810830+00:00"
     },
-    "Drubisy Diabitus": {
+    "Isidro The'third": {
       "count": 3,
-      "job": "mch",
-      "worst": 3.1,
-      "last": "2026-09-23T23:17:05.295000+02:00"
-    },
-    "Arylith Zarell": {
-      "count": 5,
-      "job": "mnk",
-      "worst": 13.5,
-      "last": "2026-09-23T23:22:45.177000+02:00"
-    },
-    "Lain Azure": {
-      "count": 2,
-      "job": "default",
-      "worst": 1.1,
-      "last": "2026-09-23T23:04:15.042000+02:00"
+      "job": "drg",
+      "worst": 7.49,
+      "last": "2026-10-07T20:00:23.311508+00:00"
     },
     "Vvhen Rez": {
+      "count": 3,
+      "job": "sge",
+      "worst": 8.63,
+      "last": "2026-10-07T20:00:23.311508+00:00"
+    },
+    "Lain Azure": {
+      "count": 3,
+      "job": "vpr",
+      "worst": 7.98,
+      "last": "2026-10-07T20:00:23.311508+00:00"
+    },
+    "Yolorf Yuu": {
+      "count": 2,
+      "job": "drk",
+      "worst": 2.06,
+      "last": "2026-10-07T20:00:23.311508+00:00"
+    },
+    "Annie Von": {
+      "count": 2,
+      "job": "dnc",
+      "worst": 7.31,
+      "last": "2026-10-07T20:00:23.311508+00:00"
+    },
+    "Drubisy Diabitus": {
       "count": 1,
-      "job": "default",
-      "worst": 0.9,
-      "last": "2026-09-23T22:58:21.851000+02:00"
+      "job": "mch",
+      "worst": 3.06,
+      "last": "2026-10-07T20:00:23.311508+00:00"
     }
   }
 }

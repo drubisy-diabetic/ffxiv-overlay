@@ -1,4 +1,4 @@
-import sys, os, json, asyncio, threading
+import sys, os, json, asyncio, threading, traceback, faulthandler
 from datetime import datetime, timezone
 from PyQt6.QtWidgets import *
 from PyQt6.QtCore import Qt, QSettings, pyqtSignal, QObject
@@ -9,6 +9,47 @@ import asyncio
 
 # Import your player row class
 from player import PlayerRow
+
+
+# --- Crash logging -----------------------------------------------------------
+# PyQt6 aborts the whole app on any unhandled exception inside a Qt slot, and
+# the exe is built with --noconsole, so the traceback vanished with it. These
+# hooks write every error to overlay_crash.log (next to the exe, or the working
+# folder when run from source) and let the overlay keep running when it can.
+def _crash_log_path():
+    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.abspath(".")
+    return os.path.join(base, "overlay_crash.log")
+
+
+def log_exception(exc_type, exc_value, exc_tb, where="unhandled"):
+    text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    stamp = datetime.now().isoformat(timespec="seconds")
+    try:
+        with open(_crash_log_path(), "a", encoding="utf-8") as f:
+            f.write(f"\n=== {stamp} [{where}] ===\n{text}")
+    except OSError:
+        pass
+    if sys.stderr:
+        sys.stderr.write(text)
+
+
+_faulthandler_file = None
+
+
+def install_crash_logging():
+    global _faulthandler_file
+    # Replacing sys.excepthook is also what stops PyQt6 from aborting on a
+    # Python exception in a slot.
+    sys.excepthook = lambda t, v, tb: log_exception(t, v, tb, "qt/main")
+    threading.excepthook = lambda a: log_exception(a.exc_type, a.exc_value, a.exc_traceback,
+                                                   f"thread {a.thread.name if a.thread else '?'}")
+    try:
+        # Native crashes (inside Qt itself) can't be caught, but faulthandler
+        # still writes the Python stack at the moment of the crash.
+        _faulthandler_file = open(_crash_log_path(), "a", encoding="utf-8")
+        faulthandler.enable(_faulthandler_file)
+    except OSError:
+        pass
 from prepull import (PrePullDetector, PrePullStore, PrePullPopup,
                      PrePullBoard, extract_log_line)
 
@@ -21,8 +62,10 @@ LOG_FILEPATH = "websocket_logs.jsonl"
 DEFAULT_LOGGING_ENABLED = True
 # Defaults for the optional "prepull" section of config.json.
 DEFAULT_PREPULL = {
-    "tolerance_s": 0.3,
-    "popup_s": 3.0,
+    "tolerance_s": 0.7,     # must engage more than this many s before zero to count
+    "tie_window_s": 3.0,    # others within this many s of the first puller also count
+    "settle_s": 1.0,        # wait this long after zero before deciding (late packets)
+    "popup_s": 10.0,         # how long the popup stays up
     # Enmity comes from OverlayPlugin's /ws endpoint (the MiniParse endpoint
     # above only broadcasts CombatData/log lines; enmity must be subscribed).
     "enmity": True,
@@ -122,7 +165,9 @@ class Overlay(QWidget):
         prepull_cfg = dict(DEFAULT_PREPULL)
         prepull_cfg.update(self._load_settings_file().get("prepull", {}))
         self.prepull_cfg = prepull_cfg
-        self.prepull_detector = PrePullDetector(tolerance=prepull_cfg["tolerance_s"])
+        self.prepull_detector = PrePullDetector(tolerance=prepull_cfg["tolerance_s"],
+                                                tie_window=prepull_cfg["tie_window_s"],
+                                                settle=prepull_cfg["settle_s"])
         self._last_enmity_log_key = {}
         self.prepull_store = PrePullStore()
         self.prepull_popup = PrePullPopup(seconds=prepull_cfg["popup_s"])
@@ -157,12 +202,18 @@ class Overlay(QWidget):
         self.prepull_board.setVisible(self.board_visible)
 
     def _load_settings_file(self):
-        """Best-effort read of config.json (used for the logging toggle)."""
-        try:
-            with open(resource_path("config.json"), "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError):
-            return {}
+        """Best-effort read of config.json. Looks NEXT TO THE EXE first (or the
+        working folder when run from source) so it can be edited after
+        building; the bundled copy is only a fallback. Previously only the
+        bundled path was read, so the exe silently ignored config.json."""
+        base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.abspath(".")
+        for path in (os.path.join(base, "config.json"), resource_path("config.json")):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, json.JSONDecodeError):
+                continue
+        return {}
 
     def init_ui(self):
         # 1. Outer layout
@@ -226,6 +277,11 @@ class Overlay(QWidget):
         """)
         self.opacity_slider.valueChanged.connect(self.update_opacity)
         self.rows_layout.addWidget(self.opacity_slider)
+
+        # Player DPS bars follow this global UI opacity (0.0-1.0). Kept in sync
+        # with the slider here and in update_opacity() so the bars render at the
+        # same transparency as the rest of the overlay instead of always at 1.0.
+        self._current_opacity = self.opacity_slider.value() / 255.0
 
         self.grip = QSizeGrip(self)
 
@@ -319,7 +375,8 @@ class Overlay(QWidget):
             dps_val = get_dps_num(p)
             relative_fill = (dps_val / max_dps) if max_dps > 0 else 0
 
-            row = PlayerRow(name, dps_str, pct_str, job, relative_fill, death_count)
+            row = PlayerRow(name, dps_str, pct_str, job, relative_fill, death_count,
+                            opacity=self._current_opacity)
             self.rows_layout.addWidget(row)
 
         # 8. Spacer
@@ -362,14 +419,33 @@ class Overlay(QWidget):
         self.apply_util_settings()
 
     # --- Pre-pull -----------------------------------------------------------
-    def on_prepull(self, event):
-        """Main-thread slot: count it, refresh the board, flash the popup."""
-        count = self.prepull_store.add(event)
-        print(f"PRE-PULL: {event['name']} {event['early_by']}s early "
-              f"({event.get('ability') or '-'}, via {event.get('evidence')})")
-        self.prepull_board.refresh(highlight=event["name"])
-        self.prepull_popup.show_event(event, count=count,
-                                      colors=self.prepull_board.colors, anchor=self)
+    def on_prepull(self, record):
+        """Main-thread slot for every pull decision: log it to the history,
+        count each pre-puller, refresh the board, flash the popup."""
+        # Each step guarded separately: a failure while drawing the popup must
+        # never lose the count, and nothing here may take the overlay down.
+        try:
+            self.prepull_store.append_history(record)
+            offenders = record.get("offenders") or []
+            if not offenders:
+                return  # clean pull -- history only
+            counts = []
+            for o in offenders:
+                counts.append(self.prepull_store.add(dict(o, timestamp=record.get("timestamp"))))
+                print(f"PRE-PULL: {o.get('name')} {o.get('early_by')}s early "
+                      f"({o.get('ability') or '-'}, via {o.get('evidence')})")
+        except Exception:
+            log_exception(*sys.exc_info(), where=f"on_prepull/count record={record!r:.2000}")
+            return
+        for step, action in (
+            ("board", lambda: self.prepull_board.refresh(highlight=offenders[0]["name"])),
+            ("popup", lambda: self.prepull_popup.show_pull(offenders, counts=counts,
+                                                           colors=self.prepull_board.colors, anchor=self)),
+        ):
+            try:
+                action()
+            except Exception:
+                log_exception(*sys.exc_info(), where=f"on_prepull/{step} offenders={offenders!r:.2000}")
 
     def test_prepull_popup(self):
         """Show the popup with fake data (not counted) to check its position."""
@@ -410,8 +486,8 @@ class Overlay(QWidget):
             await asyncio.sleep(0.2)
             try:
                 event = self.prepull_detector.tick()
-            except Exception as e:
-                print(f"pre-pull tick error: {e}")
+            except Exception:
+                log_exception(*sys.exc_info(), where="detector.tick")
                 continue
             if event:
                 self.bridge.prepull_detected.emit(event)
@@ -454,8 +530,12 @@ class Overlay(QWidget):
                         data = data.get("msg", data) if isinstance(data.get("msg"), dict) else data
                         if data.get("type") not in ENMITY_EVENTS:
                             continue
-                        self._log_enmity(msg, data)
-                        event = self.prepull_detector.feed_enmity(data)
+                        try:
+                            self._log_enmity(msg, data)
+                            event = self.prepull_detector.feed_enmity(data)
+                        except Exception:
+                            log_exception(*sys.exc_info(), where=f"detector.feed_enmity {msg[:300]!r}")
+                            event = None
                         if event:
                             self.bridge.prepull_detected.emit(event)
             except Exception as e:
@@ -496,7 +576,11 @@ class Overlay(QWidget):
                             # in the WS thread; results go to the UI via signal).
                             log_line = extract_log_line(raw)
                             if log_line is not None:
-                                event = self.prepull_detector.feed_line(log_line)
+                                try:
+                                    event = self.prepull_detector.feed_line(log_line)
+                                except Exception:
+                                    log_exception(*sys.exc_info(), where=f"detector.feed_line {log_line[:300]!r}")
+                                    event = None
                                 if event:
                                     self.bridge.prepull_detected.emit(event)
                                 continue
@@ -549,6 +633,7 @@ class Overlay(QWidget):
 
     def update_opacity(self, value):
         """Updates the background alpha of the container"""
+        self._current_opacity = value / 255.0
         self.container.setStyleSheet(f"""
             background: rgba(20, 20, 20, {value}); 
             border: 1px solid rgba(255, 255, 255, 30); 
@@ -583,6 +668,7 @@ class Bridge(QObject):
     enmity_status = pyqtSignal(bool)
 
 if __name__ == '__main__':
+    install_crash_logging()
     app = QApplication(sys.argv)
     gui = Overlay()
     sys.exit(app.exec())

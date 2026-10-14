@@ -15,5 +15,13 @@
     },
     "logging": {
         "websocket": true
+    },
+    "prepull": {
+        "tolerance_s": 0.7,
+        "tie_window_s": 3.0,
+        "settle_s": 1.0,
+        "popup_s": 10.0,
+        "enmity": true,
+        "enmity_ws": "ws://127.0.0.1:10501/ws"
     }
 }

@@ -1,0 +1,21 @@
+
+=== 2026-09-29T21:07:53 [qt/main] ===
+Traceback (most recent call last):
+  File "H:\project_forge\Forge\projects\ffxiv-overlay\overlay.py", line 295, in update_log_indicator
+    def update_log_indicator(self, count):
+    
+KeyboardInterrupt
+
+=== 2026-09-29T21:07:58 [qt/main] ===
+Traceback (most recent call last):
+  File "H:\project_forge\Forge\projects\ffxiv-overlay\overlay.py", line 295, in update_log_indicator
+    def update_log_indicator(self, count):
+    
+KeyboardInterrupt
+
+=== 2026-09-29T21:08:00 [qt/main] ===
+Traceback (most recent call last):
+  File "H:\project_forge\Forge\projects\ffxiv-overlay\overlay.py", line 295, in update_log_indicator
+    def update_log_indicator(self, count):
+    
+KeyboardInterrupt
